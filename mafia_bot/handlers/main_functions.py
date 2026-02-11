@@ -735,6 +735,7 @@ async def create_main_messages(game_id, tg_id_for_lang):
         return msg + f"\n\n{t['no_players']}"
 
     users_map = game.get("users_map", {})
+    count = 0
     
     for tg_id in tg_ids:
         user = users_map.get(tg_id)
