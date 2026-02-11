@@ -131,7 +131,7 @@ async def send_night_action( tg_id, role, game_id, game, users_after_night, day)
         await send_safe_message(
             chat_id=tg_id,
             text=get_actions_lang(tg_id).get("doc_heal"),
-            reply_markup=doc_btn(players=users_after_night, doctor_id=tg_id, game_id=game.id, chat_id=game.chat_id,day=day)
+            reply_markup=await doc_btn(players=users_after_night, doctor_id=tg_id, game_id=game.id, chat_id=game.chat_id,day=day)
         )
         return
     elif role == "daydi":
@@ -187,7 +187,7 @@ async def send_night_action( tg_id, role, game_id, game, users_after_night, day)
         
             chat_id=tg_id,
             text=get_actions_lang(tg_id).get("don_kill"),
-            reply_markup=don_inline_btn(players=users_after_night, game_id=game.id, chat_id=game.chat_id, don_id=tg_id, day=day)
+            reply_markup=await don_inline_btn(players=users_after_night, game_id=game.id, chat_id=game.chat_id, don_id=tg_id, day=day)
         )
         return
 
@@ -196,7 +196,7 @@ async def send_night_action( tg_id, role, game_id, game, users_after_night, day)
         
             chat_id=tg_id,
             text=get_actions_lang(tg_id).get("mafia_vote"),
-            reply_markup=mafia_inline_btn(players=users_after_night, game_id=game.id,day=day)
+            reply_markup=await mafia_inline_btn(players=users_after_night, game_id=game.id,day=day)
         )
         return
     elif role == "adv":
@@ -204,7 +204,7 @@ async def send_night_action( tg_id, role, game_id, game, users_after_night, day)
         
             chat_id=tg_id,
             text=get_actions_lang(tg_id).get("adv_mask"),
-            reply_markup=adv_inline_btn(players=users_after_night, game_id=game.id, chat_id=game.chat_id,day=day)
+            reply_markup=await adv_inline_btn(players=users_after_night, game_id=game.id, chat_id=game.chat_id,day=day)
         )
         return
     elif role == "spy":
@@ -212,7 +212,7 @@ async def send_night_action( tg_id, role, game_id, game, users_after_night, day)
         
             chat_id=tg_id,
             text=get_actions_lang(tg_id).get("spy_check"),
-            reply_markup=spy_inline_btn(players=users_after_night, game_id=game.id, chat_id=game.chat_id,day=day,spy_id=tg_id)
+            reply_markup=await spy_inline_btn(players=users_after_night, game_id=game.id, chat_id=game.chat_id,day=day,spy_id=tg_id)
         )
         return
     elif role == "lab":

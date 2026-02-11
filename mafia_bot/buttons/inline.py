@@ -1,7 +1,7 @@
 import random
 from decouple import config
 from django.utils import timezone
-from mafia_bot.utils import games_state
+from mafia_bot.storage import GameStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from mafia_bot.models import  PriceStones,  PremiumGroup, User, UserRole
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -755,9 +755,9 @@ def go_to_bot_inline_btn(chat_id,number=1):
     return keyboard
 
 # Doctor inline button
-def doc_btn(players,doctor_id=None,game_id=None,chat_id=None,day=None):
+async def doc_btn(players,doctor_id=None,game_id=None,chat_id=None,day=None):
     builder = InlineKeyboardBuilder()
-    game = games_state.get(int(game_id), {})
+    game = await GameStorage.load(game_id)
     used_self = game.get("limits", {}).get("doc_self_heal_used", set())
     for player in players :
         first_name = player.get("first_name")
@@ -799,9 +799,9 @@ def com_inline_btn(game_id,chat_id,day=None):
     return builder.as_markup()
 
 # Com inline action button
-def com_inline_action_btn(action,game_id,chat_id,day=None,com_id=None):
+async def com_inline_action_btn(action,game_id,chat_id,day=None,com_id=None):
     builder = InlineKeyboardBuilder()
-    game = games_state.get(int(game_id), {})
+    game = await GameStorage.load(game_id)
     alive_players = game.get("alive", [])
     users_map = game.get("users_map", {})
     alive_users_qs = [users_map[tg_id] for tg_id in alive_players if tg_id in users_map]
@@ -868,10 +868,13 @@ def confirm_hang_inline_btn(voted_user_id,game_id,chat_id,yes=0, no=0):
     
 
 
-def don_inline_btn(players,  game_id, chat_id, don_id,day=None):
+async def don_inline_btn(players,  game_id, chat_id, don_id,day=None):
     builder = InlineKeyboardBuilder()
 
-    roles_map = games_state.get(int(game_id), {}).get("roles", {})
+    game = await GameStorage.load(game_id)
+    if not game.data:
+        return builder.as_markup()
+    roles_map = game.get("roles", {})
 
     for player in players:
         tg_id = player.get("tg_id")
@@ -906,10 +909,12 @@ def don_inline_btn(players,  game_id, chat_id, don_id,day=None):
     return builder.as_markup()
 
 
-def mafia_inline_btn(players, game_id,day=None):
+async def mafia_inline_btn(players, game_id,day=None):
     builder = InlineKeyboardBuilder()
-
-    roles_map = games_state.get(int(game_id), {}).get("roles", {})
+    game = await GameStorage.load(game_id)
+    if not game.data:
+        return builder.as_markup()
+    roles_map = game.get("roles", {})
 
     for player in players:
         tg_id = player.get("tg_id")
@@ -944,9 +949,12 @@ def mafia_inline_btn(players, game_id,day=None):
     return builder.as_markup()
 
 
-def adv_inline_btn(players,  game_id, chat_id,day=None):
+async def adv_inline_btn(players,  game_id, chat_id,day=None):
     builder = InlineKeyboardBuilder()
-    roles_map = games_state.get(int(game_id), {}).get("roles", {})
+    game =await GameStorage.load(game_id)
+    if not game.data:
+        return builder.as_markup()
+    roles_map = game.get("roles", {})
     for player in players:
         tg_id = player.get("tg_id")
         first_name = player.get("first_name")
@@ -973,9 +981,12 @@ def adv_inline_btn(players,  game_id, chat_id,day=None):
     return builder.as_markup()
 
 
-def spy_inline_btn(players,  game_id, chat_id,day=None,spy_id=None):
+async def spy_inline_btn(players,  game_id, chat_id,day=None,spy_id=None):
     builder = InlineKeyboardBuilder()
-    roles_map = games_state.get(int(game_id), {}).get("roles", {})
+    game = await GameStorage.load(game_id)
+    if not game.data:
+        return builder.as_markup()
+    roles_map = game.get("roles", {})
     for player in players:
         tg_id = player.get("tg_id")
         first_name = player.get("first_name")

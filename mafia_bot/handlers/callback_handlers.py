@@ -612,7 +612,7 @@ async def com_callback(callback: CallbackQuery):
             pass
         await callback.message.edit_text(
             text=get_actions_lang(callback.from_user.id).get("com_shoot"),
-            reply_markup=com_inline_action_btn(action="shoot",chat_id=chat_id, game_id=int(parts[2]),com_id=com_id,day=day)
+            reply_markup=await com_inline_action_btn(action="shoot",chat_id=chat_id, game_id=int(parts[2]),com_id=com_id,day=day)
         )
         return
 
@@ -622,7 +622,7 @@ async def com_callback(callback: CallbackQuery):
         pass
     await callback.message.edit_text(
         text=get_actions_lang(callback.from_user.id).get("com_check"),
-        reply_markup=com_inline_action_btn(action="search",chat_id=chat_id, game_id=int(parts[2]),com_id=com_id,day=day)
+        reply_markup=await com_inline_action_btn(action="search",chat_id=chat_id, game_id=int(parts[2]),com_id=com_id,day=day)
     )
 
 
