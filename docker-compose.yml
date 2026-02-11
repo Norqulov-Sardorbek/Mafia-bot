@@ -26,7 +26,7 @@ services:
       - media_data:/app/media
       - static_data:/app/staticfiles
     ports:
-      - "8000:8000"
+      - "7000:7000"
     env_file:
       - .env
     depends_on:
