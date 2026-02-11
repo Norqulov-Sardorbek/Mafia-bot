@@ -736,9 +736,10 @@ async def create_main_messages(game_id, tg_id_for_lang):
 
     users_map = game.get("users_map", {})
     count = 0
-    
+    print(users_map,"users_map------------------")
     for tg_id in tg_ids:
         user = users_map.get(tg_id)
+        print(user,"user------------------")
         if not user:
             continue
         msg += f'<a href="tg://user?id={tg_id}">{user.get("first_name")}</a>, '
