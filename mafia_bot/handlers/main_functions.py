@@ -1,22 +1,19 @@
-import json
 import re
 import time
 import random
 import asyncio
 from typing import Counter
-from core.redis_client import redis_client
 from dispatcher import bot
 from threading import Lock
 from datetime import timedelta
 from django.db import transaction
 from aiogram.types import Message
 from django.db.models import F as DF
-from mafia_bot.storage import GameStorage
 from aiogram.enums import ChatMemberStatus
 from core.constants import uz_texts,ROLES_BY_COUNT,ru_texts,en_texts,tr_texts,qz_texts
 from mafia_bot.models import Game, GameSettings,User,MostActiveUser, UserRole, GroupTrials
 from aiogram.types import ChatPermissions,ChatMemberAdministrator, ChatMemberOwner
-from mafia_bot.utils import  last_wishes,game_tasks, active_role_used,writing_allowed_groups,USER_LANG_CACHE,game_locks
+from mafia_bot.utils import games_state, last_wishes,game_tasks, active_role_used,writing_allowed_groups,USER_LANG_CACHE,game_locks
 from mafia_bot.buttons.inline import cart_inline_btn, doc_btn, com_inline_btn, don_inline_btn, mafia_inline_btn, adv_inline_btn, spy_inline_btn, lab_inline_btn, action_inline_btn,use_hero_inline_btn
 
 lock = Lock()
@@ -120,7 +117,7 @@ ROLE_TEAM = {
 
 
 async def send_night_action( tg_id, role, game_id, game, users_after_night, day):
-    game_data = await GameStorage.load(game_id)
+    game_data = games_state.get(game_id, {})
     night_action = game_data.get("night_actions", {})
     lover_block_target = night_action.get("lover_block_target")
     if lover_block_target == tg_id:
@@ -131,7 +128,7 @@ async def send_night_action( tg_id, role, game_id, game, users_after_night, day)
         await send_safe_message(
             chat_id=tg_id,
             text=get_actions_lang(tg_id).get("doc_heal"),
-            reply_markup=await doc_btn(players=users_after_night, doctor_id=tg_id, game_id=game.id, chat_id=game.chat_id,day=day)
+            reply_markup=doc_btn(players=users_after_night, doctor_id=tg_id, game_id=game.id, chat_id=game.chat_id,day=day)
         )
         return
     elif role == "daydi":
@@ -187,7 +184,7 @@ async def send_night_action( tg_id, role, game_id, game, users_after_night, day)
         
             chat_id=tg_id,
             text=get_actions_lang(tg_id).get("don_kill"),
-            reply_markup=await don_inline_btn(players=users_after_night, game_id=game.id, chat_id=game.chat_id, don_id=tg_id, day=day)
+            reply_markup=don_inline_btn(players=users_after_night, game_id=game.id, chat_id=game.chat_id, don_id=tg_id, day=day)
         )
         return
 
@@ -196,7 +193,7 @@ async def send_night_action( tg_id, role, game_id, game, users_after_night, day)
         
             chat_id=tg_id,
             text=get_actions_lang(tg_id).get("mafia_vote"),
-            reply_markup=await mafia_inline_btn(players=users_after_night, game_id=game.id,day=day)
+            reply_markup=mafia_inline_btn(players=users_after_night, game_id=game.id,day=day)
         )
         return
     elif role == "adv":
@@ -204,7 +201,7 @@ async def send_night_action( tg_id, role, game_id, game, users_after_night, day)
         
             chat_id=tg_id,
             text=get_actions_lang(tg_id).get("adv_mask"),
-            reply_markup=await adv_inline_btn(players=users_after_night, game_id=game.id, chat_id=game.chat_id,day=day)
+            reply_markup=adv_inline_btn(players=users_after_night, game_id=game.id, chat_id=game.chat_id,day=day)
         )
         return
     elif role == "spy":
@@ -212,7 +209,7 @@ async def send_night_action( tg_id, role, game_id, game, users_after_night, day)
         
             chat_id=tg_id,
             text=get_actions_lang(tg_id).get("spy_check"),
-            reply_markup=await spy_inline_btn(players=users_after_night, game_id=game.id, chat_id=game.chat_id,day=day,spy_id=tg_id)
+            reply_markup=spy_inline_btn(players=users_after_night, game_id=game.id, chat_id=game.chat_id,day=day,spy_id=tg_id)
         )
         return
     elif role == "lab":
@@ -289,7 +286,7 @@ async def send_night_action( tg_id, role, game_id, game, users_after_night, day)
         return
     
 async def send_night_actions_to_all( game_id, game,players,day):
-    game_data = await GameStorage.load(game_id)
+    game_data = games_state.get(game_id, {})
     roles_map = game_data.get("roles", {})
 
     tasks = []
@@ -303,25 +300,23 @@ async def send_night_actions_to_all( game_id, game,players,day):
 
     await asyncio.gather(*tasks, return_exceptions=True)
 
-async def init_game(game_id: int, chat_id: int | None = None):
 
-    game = await GameStorage.load(game_id)
+def init_game(game_id: int, chat_id: int | None = None):
+    with lock:
+        if game_id in games_state:
+            return
+        max_players = 30
+        game_settings = GameSettings.objects.filter(group_id=int(chat_id)).first()
+        if game_settings and game_settings.begin_instance:
+            max_players = game_settings.number_of_players if game_settings else max_players
+        game = Game.objects.filter(id=game_id).first()
+        if game and game.game_type == 'turnir':
+            type_game = 'turnir'
+        else:
+            type_game = 'classic'
+       
 
-    if game.data:
-        return game
-
-    max_players = 30
-
-    if chat_id:
-        settings = GameSettings.objects.filter(group_id=int(chat_id)).first()
-        if settings and settings.begin_instance:
-            max_players = settings.number_of_players
-
-    db_game = Game.objects.filter(id=game_id).first()
-    type_game = "turnir" if db_game and db_game.game_type == "turnir" else "classic"
-
-
-    data = {
+        games_state[game_id] = {
             "meta": {
                 "game_id": game_id,
                 "chat_id": chat_id,
@@ -337,15 +332,15 @@ async def init_game(game_id: int, chat_id: int | None = None):
             },
             "runtime": {
                 "night_event": None,
-                "pending_night": [],
+                "pending_night": set(),
                 "hang_event": None,
-                "pending_hang": [],
+                "pending_hang": set(),
                 "confirm_event": None,
-                "pending_confirm": [],
+                "pending_confirm": set(),
              },
             "afk": {
                 "missed_nights": {},   # {tg_id: count}
-                "kicked": [],       # kicked users log
+                "kicked": set(),       # kicked users log
             },
 
             "allowed_to_send_message":[] ,
@@ -360,16 +355,15 @@ async def init_game(game_id: int, chat_id: int | None = None):
             "team": {},
 
             "hero": {
-                "has": [],
-                'self_protect':[],
-                "used": [],
-                "notified": [], 
-                "hero_used":{},
+                "has": set(),
+                'self_protect':set(),
+                "used": set(),
+                "notified": set(), 
             },
 
             "limits": {
-                "doc_self_heal_used": [],
-                "traitor_transformed": [],
+                "doc_self_heal_used": set(),
+                "traitor_transformed": set(),
             },
 
             "effects": {
@@ -383,13 +377,13 @@ async def init_game(game_id: int, chat_id: int | None = None):
 
             "visits": {
                 "log": [],
-                "invisible_visitors": [],
+                "invisible_visitors": set(),
             },
 
             "kills": {
                 "shooted": {},
-                "hanged": [],
-                "special": [],
+                "hanged": set(),
+                "special": set(),
             },
 
             "night_actions": {
@@ -444,15 +438,13 @@ async def init_game(game_id: int, chat_id: int | None = None):
                 "kamikaze_take": None,
             },
         }
-    game.data = data
-    await game.save()
-    
+
 BAD_GUYS = {"mafia","don"}
 
 
 async def punish_afk_night_players(game_id):
-    game = await GameStorage.load(game_id)
-    if not game.data:
+    game = games_state.get(game_id)
+    if not game:
         return
 
     roles = game.get("roles", {})
@@ -482,16 +474,11 @@ async def punish_afk_night_players(game_id):
     to_kick = [pid for pid, cnt in missed.items() if cnt >= 2 and pid in alive]
 
     if not to_kick:
-        afk["missed_nights"] = missed
-        afk["kicked"] = list(kicked)
-        game["afk"] = afk
-        await game.save()
         return
 
     # userlarni 1 ta query bilan olish
     users_qs = game.get("users_map", {})
     night_text= []
-    
     for pid in to_kick:
         alive.discard(pid)
         kicked.add(pid)
@@ -533,18 +520,6 @@ async def punish_afk_night_players(game_id):
             
             role_label = get_role_labels_lang(chat_id).get(role, role)
             night_text.append(tg["punish_afk"].format(name=name, role_label=role_label,pid=pid))
-            
-    afk["missed_nights"] = missed
-    afk["kicked"] = list(kicked)
-    game["afk"] = afk
-
-    # Pending ni list holatda saqlaymiz
-    runtime["pending_night"] = list(pending)
-    game["runtime"] = runtime
-
-    # SAVE 🔥
-    await game.save()
-    
     try:
         await send_safe_message(
         chat_id=int(chat_id),
@@ -553,10 +528,115 @@ async def punish_afk_night_players(game_id):
         )
     except Exception:
         pass
+    
 
 
 
 
+
+
+def prepare_hang_pending(game_id:int):
+    game = games_state.get(game_id)
+    if not game:
+        return
+
+    alive = set(game.get("alive", []))
+
+    game.setdefault("runtime", {})
+    game["runtime"]["pending_hang"] = set(int(x) for x in alive)
+    game["runtime"]["hang_event"] = asyncio.Event()
+
+    if not alive:
+        game["runtime"]["hang_event"].set()
+
+def mark_hang_done(game_id, voter_id: int):
+    
+    game = games_state.get(game_id)
+    if not game:
+        return
+
+    runtime = game.get("runtime", {})
+    pending = runtime.get("pending_hang")
+    event = runtime.get("hang_event")
+
+    if not pending or not event:
+        return
+
+    pending.discard(int(voter_id))
+
+    if len(pending) == 0:
+        event.set()
+
+
+def prepare_night_pending(game_id: int):
+    game = games_state.get(game_id)
+    if not game:
+        return
+
+    roles = game.get("roles", {})
+    alive = set(game.get("alive", []))
+
+    pending = set()
+    for tg_id in alive:
+        role = roles.get(int(tg_id))
+        if role in NIGHT_ACTION_ROLES:
+            pending.add(int(tg_id))
+
+    game.setdefault("runtime", {})
+    game["runtime"]["pending_night"] = pending
+    game["runtime"]["night_event"] = asyncio.Event()
+
+    if not pending:
+        game["runtime"]["night_event"].set()
+
+def mark_night_action_done(game, tg_id: int):
+    if not game:
+        return
+
+    runtime = game.get("runtime", {})
+    pending = runtime.get("pending_night")
+    event = runtime.get("night_event")
+
+    if pending is None or event is None:
+        return
+
+    pending.discard(int(tg_id))
+
+    if len(pending) == 0:
+        event.set()
+
+def prepare_confirm_pending(game_id: int, voted_user_id: int):
+    game = games_state.get(game_id)
+    if not game:
+        return
+
+    alive = set(int(x) for x in game.get("alive", []))
+
+    # ✅ osilayotgan odam confirm bermaydi
+    alive.discard(int(voted_user_id))
+
+    game.setdefault("runtime", {})
+    game["runtime"]["pending_confirm"] = alive
+    game["runtime"]["confirm_event"] = asyncio.Event()
+
+    if not alive:
+        game["runtime"]["confirm_event"].set()
+        
+def mark_confirm_done(game_id, voter_id: int):
+    game = games_state.get(game_id)
+
+    runtime = game.get("runtime", {})
+    pending = runtime.get("pending_confirm")
+    event = runtime.get("confirm_event")
+
+    if pending is None or event is None:
+        return
+
+
+    pending.discard(int(voter_id))
+
+    if len(pending) == 0:
+        event.set()
 
 def get_hero_level(tg_id):
     try:
@@ -565,11 +645,8 @@ def get_hero_level(tg_id):
         return 0
 
 
-async def get_most_voted_id(game_id: int):
-    game = await GameStorage.load(game_id)
-    if not game.data:
-        return False
-    all_votes = game.get("day_actions", {}).get("votes", [])
+def get_most_voted_id(game_id: int):
+    all_votes = games_state.get(game_id, {}).get("day_actions", {}).get("votes", [])
     if not all_votes:
         return False
 
@@ -589,10 +666,9 @@ async def get_most_voted_id(game_id: int):
         return False
 
     return result
-
-async def can_hang(game_id: int) -> bool:
-    game = await GameStorage.load(game_id)
-    if not game.data:
+def can_hang(game_id: int) -> bool:
+    game = games_state.get(game_id)
+    if not game:
         return False
 
     yes = len(game["day_actions"].get("hang_yes", []))
@@ -602,10 +678,8 @@ async def can_hang(game_id: int) -> bool:
     else:
         return "no" , yes, no
     
-async def get_mafia_members(game_id):
-    game = await GameStorage.load(game_id)
-    if not game.data:
-        return []
+def get_mafia_members(game_id):
+    game = games_state.get(int(game_id), {})
     roles_map = game.get("roles", {})
     alive = set(game.get("alive", []))
 
@@ -659,74 +733,36 @@ async def process_santa_reward(target_id, callback):
 def is_alive(game, tg_id: int) -> bool:
     return int(tg_id) in set(game.get("alive", []))
 
-async def find_game(game_id, tg_id, chat_id, user):
 
-    await init_game(game_id, chat_id)
 
+def find_game(game_id, tg_id,chat_id,user):
+    init_game(game_id,chat_id)
     tg_id = int(tg_id)
 
-    game = await GameStorage.load(game_id)
+    with lock:
+        game = games_state[game_id]
 
-    players = game.get("players", [])
-    meta = game.get("meta", {})
-    users_map = game.get("users_map", {})
-    alive = game.get("alive", [])
+        if tg_id in game["players"]:
+            return {"message": "already_in"}
+        max_players = game["meta"].get("max_players", 30)
+        if len(game["players"]) >= max_players:
+            return {"message": "full"}
 
-    if tg_id in players:
-        return {"message": "already_in"}
-
-    max_players = meta.get("max_players", 30)
-
-    if len(players) >= max_players:
-        return {"message": "full"}
-
-    # player qo‘shamiz
-    players.append(tg_id)
-
-    if meta.get("game_type") == "turnir":
-        users_map[tg_id] = {
-            "first_name": user.first_name,
-            "protection": 1 if user.protection >= 1 and user.is_protected else 0,
-            "doc": 1 if user.docs >= 1 and user.is_doc else 0,
-            "hang_protect": 1 if user.hang_protect >= 1 and user.is_hang_protected else 0,
-            "geroy_protect": 1 if user.geroy_protection >= 1 and user.is_geroy_protected else 0,
-            "tg_id": tg_id,
-            "hero": False,
-        }
-    else:
-        users_map[tg_id] = {
-            "first_name": user.first_name,
-            "protection": 1 if user.protection >= 1 and user.is_protected else 0,
-            "doc": 1 if user.docs >= 1 and user.is_doc else 0,
-            "hang_protect": 1 if user.hang_protect >= 1 and user.is_hang_protected else 0,
-            "geroy_protect": 1 if user.geroy_protection >= 1 and user.is_geroy_protected else 0,
-            "tg_id": tg_id,
-            "hero": user.is_hero and user.is_geroy_use,
-        }
-
-    alive.append(tg_id)
-
-    game["players"] = players
-    game["users_map"] = users_map
-    game["alive"] = alive
-    print(game.data,"------------------")
-
-    await game.save()
-
-    if len(players) == max_players:
-        return {"message": "full"}
+        game["players"].append(tg_id)
+        if game['meta']['game_type']=='turnir':
+            game["users_map"][tg_id]={"first_name":user.first_name,"protection":1 if user.protection>=1 and user.is_protected else 0,"doc": 1 if user.docs>=1 and user.is_doc else 0,"hang_protect": 1 if user.hang_protect>=1 and user.is_hang_protected else 0,"geroy_protect": 1 if user.geroy_protection>=1 and user.is_geroy_protected else 0,"tg_id":tg_id,"hero":False}
+        else:
+            game["users_map"][tg_id]={"first_name":user.first_name,"protection":1 if user.protection>=1 and user.is_protected else 0,"doc": 1 if user.docs>=1 and user.is_doc else 0,"hang_protect": 1 if user.hang_protect>=1 and user.is_hang_protected else 0,"geroy_protect": 1 if user.geroy_protection>=1 and user.is_geroy_protected else 0,"tg_id":tg_id,"hero":user.is_hero and user.is_geroy_use}
+        game["alive"].append(tg_id)
+        if len(game["players"])==max_players:
+            return {"message": "full"}
 
     return {"message": "joined"}
 
 
 
-
-async def create_main_messages(game_id, tg_id_for_lang):
-    game  = await GameStorage.load(game_id)
-    if not game.data:
-        return "Xatolik yuz berdi. Iltimos, administrator bilan bog'laning."
-    tg_ids = game.get("players", [])
-    print(tg_ids,"tg_ids------------------")
+def create_main_messages(game_id, tg_id_for_lang):
+    tg_ids = games_state.get(game_id, {}).get("players", [])
     t = get_lang_text(int(tg_id_for_lang))
 
     msg = f"{t['reg_started']}\n\n{t['reg_list']}\n"
@@ -734,12 +770,11 @@ async def create_main_messages(game_id, tg_id_for_lang):
     if not tg_ids:
         return msg + f"\n\n{t['no_players']}"
 
-    users_map = game.get("users_map", {})
+    users_map = games_state.get(game_id, {}).get("users_map", {})
+    
     count = 0
-    print(users_map,"users_map------------------")
     for tg_id in tg_ids:
         user = users_map.get(tg_id)
-        print(user,"user------------------")
         if not user:
             continue
         msg += f'<a href="tg://user?id={tg_id}">{user.get("first_name")}</a>, '
@@ -751,136 +786,118 @@ async def create_main_messages(game_id, tg_id_for_lang):
 
 
 
-async def night_reset(game_id: int):
 
-    game = await GameStorage.load(game_id)
 
-    if not game.data:
-        return False
+def night_reset(game_id: int):
+    with lock:
+        game = games_state.get(game_id)
+        if not game:
+            return False
 
-    # ---- META ----
-    meta = game.get("meta", {})
-    meta["phase"] = "night"
-    meta["night"] = meta.get("night", 0) + 1
-    game["meta"] = meta
+        game["meta"]["phase"] = "night"
+        game["meta"]["night"] += 1
 
-    # ---- EFFECTS RESET ----
-    effects = game.get("effects", {})
-    effects["protected"] = {}
-    effects["blocked"] = {}
-    effects["silenced"] = {}
-    effects["poisoned"] = {}
-    effects["no_hang"] = {}
-    effects["advokat_masked"] = {}
-    game["effects"] = effects
+        # effects reset
+        game["effects"]["protected"].clear()
+        game["effects"]["blocked"].clear()
+        game["effects"]["silenced"].clear()
+        game["effects"]["poisoned"].clear()
+        game["effects"]["no_hang"].clear()
+        game["effects"]["advokat_masked"].clear()
 
-    # ---- VISITS RESET ----
-    visits = game.get("visits", {})
-    visits["log"] = []
-    visits["invisible_visitors"] = []
-    game["visits"] = visits
+        # visits reset
+        game["visits"]["log"].clear()
+        game["visits"]["invisible_visitors"].clear()
 
-    # ---- KILLS RESET ----
-    kills = game.get("kills", {})
-    kills["shooted"] = {}
-    kills["special"] = []
-    game["kills"] = kills
+        # kills reset (night)
+        game["kills"]["shooted"].clear()
+        game["kills"]["special"].clear()
 
-    # ---- NIGHT ACTIONS RESET ----
-    na = game.get("night_actions", {})
+        # night actions reset
+        na = game["night_actions"]
 
-    na["don_kill_target"] = None
-    na["mafia_vote"] = []
+        na["don_kill_target"] = None
+        na["mafia_vote"].clear()
 
-    na["doc_target"] = None
-    na["com_check_target"] = None
-    na["com_shoot_target"] = None
+        na["doc_target"] = None
+        na["com_check_target"] = None
+        na["com_shoot_target"] = None
 
-    na["daydi_house"] = None
-    na["daydi_seen"] = []
+        na["daydi_house"] = None
+        na["daydi_seen"].clear()
 
-    na["lover_block_target"] = None
+        na["lover_block_target"] = None
 
-    na["kaldun_target"] = None
-    na["killer_target"] = []
-    na["advokat_target"] = None
-    na["spy_target"] = None
-    na["lab_target"] = None
-    na["drunk_target"] = None
+        na["kaldun_target"] = None
+        na["killer_target"] = []
+        na["advokat_target"] = None
+        na["spy_target"] = None
+        na["lab_target"] = None
+        na["drunk_target"] = None
 
-    na["trap_house"] = None
+        na["trap_house"] = None
 
-    na["snyper_target"] = None
-    na["arrow_target"] = None
+        na["snyper_target"] = None
+        na["arrow_target"] = None
 
-    na["traitor_target"] = None
-    na["snowball_target"] = None
+        na["traitor_target"] = None
 
-    # pirate
-    pirate = na.get("pirate", {})
-    pirate["pirate_id"] = None
-    pirate["target_id"] = None
-    pirate["result"] = None
-    na["pirate"] = pirate
+        na["snowball_target"] = None
 
-    # professor
-    professor = na.get("professor", {})
-    professor["target_id"] = None
-    professor["chosen"] = None
-    na["professor"] = professor
+        # pirate reset
+        na["pirate"]["pirate_id"] = None
+        na["pirate"]["target_id"] = None
+        na["pirate"]["result"] = None
 
-    game["night_actions"] = na
+        # professor reset (boxes endi yo'q)
+        na["professor"]["target_id"] = None
+        na["professor"]["chosen"] = None
 
-    # ---- RUNTIME RESET (Redis qismi) ----
-    runtime = game.get("runtime", {})
-    runtime["pending_night"] = []
-    game["runtime"] = runtime
+        rt = game.get("runtime", {})
+        rt["night_event"] = None
+        rt["pending_night"].clear()
 
-    # ---- SAVE 🔥 ----
-    await game.save()
-
+        # message allowed default
 
     return True
 
 
-async def day_reset(game_id: int):
-   
-    game = await GameStorage.load(game_id)
-    if not game.data:
-        return False
+def day_reset(game_id: int):
+    with lock:
+        game = games_state.get(game_id)
+        if not game:
+            return False
 
-    game["meta"]["phase"] = "day"
-    game["meta"]["day"] += 1
+        game["meta"]["phase"] = "day"
+        game["meta"]["day"] += 1
 
-    # day kill reset
-    game["kills"]["hanged"] = []
+        # day kill reset
+        game["kills"]["hanged"].clear()
 
-    # day actions reset
-    da = game["day_actions"]
-    da["votes"] = []
-    da["hang_yes"] = []
-    da["hang_no"] = []
+        # day actions reset
+        da = game["day_actions"]
+        da["votes"].clear()
+        da["hang_yes"].clear()
+        da["hang_no"].clear()
 
-    da["hang_confir_msg_id"] = None
-    da["last_hanged"] = None
-    da["kamikaze_trigger"] = None
-    da["kamikaze_take"] = None
+        da["hang_confir_msg_id"] = None
+        da["last_hanged"] = None
+        da["kamikaze_trigger"] = None
+        da["kamikaze_take"] = None
 
-    rt = game.get("runtime", {})
-    rt["hang_event"] = None
-    rt["pending_hang"] = {}
+        rt = game.get("runtime", {})
+        rt["hang_event"] = None
+        rt["pending_hang"].clear()
 
-    rt["confirm_event"] = None
-    rt["pending_confirm"] = {}
-    await game.save()
+        rt["confirm_event"] = None
+        rt["pending_confirm"].clear()
+
 
     return True
 
-async def shuffle_roles(game_id: int) -> bool:
-
-    game = await GameStorage.load(game_id)
-
-    if not game.data:
+def shuffle_roles(game_id) -> bool:
+    game = games_state.get(game_id)
+    if not game:
         return False
 
     players = game.get("players", [])
@@ -896,29 +913,13 @@ async def shuffle_roles(game_id: int) -> bool:
     roles_map = {}
     fixed_players = []
 
-    # 🔥 Bitta query bilan userlarni olish
-    users = {
-        u.telegram_id: u
-        for u in User.objects.filter(
-            telegram_id__in=players,
-            is_active_role_use=True
-        )
-    }
-
     for tg_id in players:
-
-        user = users.get(tg_id)
-        if not user:
+        user = User.objects.filter(telegram_id=tg_id).first()
+        if not user or not user.is_active_role_use:
             continue
 
-        user_roles = list(
-            UserRole.objects.filter(
-                user_id=user.id,
-                quantity__gt=0
-            )
-        )
-
-        if not user_roles:
+        user_roles = UserRole.objects.filter(user_id=user.id, quantity__gt=0)
+        if not user_roles.exists():
             continue
 
         chosen_ur = None
@@ -930,20 +931,11 @@ async def shuffle_roles(game_id: int) -> bool:
         if not chosen_ur:
             continue
 
-        roles_map[int(tg_id)] = chosen_ur.role_key
-        fixed_players.append(int(tg_id))
+        roles_map[tg_id] = chosen_ur.role_key
+        fixed_players.append(tg_id)
 
-        # 🔥 quantity kamaytirish
-        UserRole.objects.filter(
-            id=chosen_ur.id,
-            quantity__gt=0
-        ).update(quantity=DF("quantity") - 1)
-
-        # 0 bo‘lsa o‘chirish
-        UserRole.objects.filter(
-            id=chosen_ur.id,
-            quantity__lte=0
-        ).delete()
+        UserRole.objects.filter(id=chosen_ur.id, role_key=chosen_ur.role_key, quantity__gt=0).update(quantity=DF("quantity") - 1)
+        UserRole.objects.filter(id=chosen_ur.id, role_key=chosen_ur.role_key, quantity__lte=0).delete()
         active_role_used.append(tg_id)
 
         try:
@@ -955,33 +947,21 @@ async def shuffle_roles(game_id: int) -> bool:
     random.shuffle(remaining_players)
 
     for tg_id, role in zip(remaining_players, roles):
-        roles_map[int(tg_id)] = role
+        roles_map[tg_id] = role
 
     game["roles"] = roles_map
-
-    await game.save()
-
     return True
 
 
+def add_visit(game: dict, visitor_id: int, house_id: int, invisible: bool = False):
+    with lock:
+        if not game:
+            return
 
-async def add_visit(game: int, visitor_id: int, house_id: int, invisible: bool = False):
+        game["visits"]["log"].append((int(visitor_id), int(house_id)))
 
-    if not game.data:
-        return
-
-    visits = game.get("visits", {})
-    # log list
-    log = visits.get("log", [])
-    log.append((int(visitor_id), int(house_id)))
-    visits["log"] = log
-    # invisible list (set emas!)
-    invisible_list = visits.get("invisible_visitors", [])
-    if invisible and int(visitor_id) not in invisible_list:
-        invisible_list.append(int(visitor_id))
-    visits["invisible_visitors"] = invisible_list
-    game["visits"] = visits
-    await game.save()
+        if invisible:
+            game["visits"]["invisible_visitors"].add(int(visitor_id))
 
 
 
@@ -1025,10 +1005,7 @@ def check_bot_rights(bot_member,chat_id) -> str | bool:
 
     return False
 
-def get_mafia_kill_target(game):
-    if not game.data:
-        return None
-    night_actions = game.get("night_actions", {})
+def get_mafia_kill_target(night_actions):
     don_target = night_actions.get("don_kill_target")
     mafia_votes = night_actions.get("mafia_vote", [])  # list
 
@@ -1068,70 +1045,39 @@ def role_label(role_key: str,chat_id:int):
     return get_role_labels_lang(chat_id).get(role_key, role_key or "")
         
         
-async def kill(game: int, tg_id: int):
-
+def kill(game, tg_id: int):
     if not tg_id:
         return
-
-    if not game.data:
+    if not game:
         return
-
     tg_id = int(tg_id)
-
-    alive = game.get("alive", [])
-    dead = game.get("dead", [])
-
-    # type consistency
-    alive = [int(x) for x in alive]
-    dead = [int(x) for x in dead]
-
-    if tg_id in alive:
-        alive.remove(tg_id)
-
-    if tg_id not in dead:
-        dead.append(tg_id)
-
-    game["alive"] = alive
-    game["dead"] = dead
-
-    await game.save()
-
-async def compute_daydi_seen(game):
-
-    if not game or not game.data:
-        return []
-
-    night_actions = game.get("night_actions", {})
-    visits_data = game.get("visits", {})
+    if tg_id in game["alive"]:
+        game["alive"].remove(tg_id)
+    if tg_id not in game["dead"]:
+        game["dead"].append(tg_id)
+    
+def compute_daydi_seen(game):
+    night_actions = game["night_actions"]
 
     daydi_house = night_actions.get("daydi_house")
-
     if not daydi_house:
         night_actions["daydi_seen"] = []
-        game["night_actions"] = night_actions
-        await game.save()
         return []
 
     daydi_house = int(daydi_house)
-
-    invisible = [int(x) for x in visits_data.get("invisible_visitors", [])]
-    visits = visits_data.get("log", [])
+    invisible = game["visits"]["invisible_visitors"]
+    visits = game["visits"]["log"]
 
     seen = []
-
-    for pair in visits:
-        if not pair or len(pair) != 2:
-            continue
-
-        visitor_id, house_id = pair
+    for visitor_id, house_id in visits:
         visitor_id = int(visitor_id)
         house_id = int(house_id)
 
-        # Faqat daydi tanlagan uy
+        # Faqat daydi tanlagan uyga kelganlar
         if house_id != daydi_house:
             continue
 
-        # Ko‘rinmas visitorlar
+        # Ko‘rinmaydigan visitorlar
         if visitor_id in invisible:
             continue
 
@@ -1143,16 +1089,9 @@ async def compute_daydi_seen(game):
             seen.append(visitor_id)
 
     night_actions["daydi_seen"] = seen
-    game["night_actions"] = night_actions
-
-    await game.save()
-
     return seen
 
-
 def get_alive_role_id(game, role_key: str):
-    if not game or not game.data:
-        return None
     roles = game.get("roles", {})
     for tg_id, r in roles.items():
         if r == role_key :
@@ -1165,7 +1104,7 @@ def get_alive_role_ids(game, role_key: str):
     return [tg_id for tg_id, r in roles.items() if r == role_key and tg_id in alive]
 
 
-async def get_visible_role_for_com(game, target_id: int, users_map=None) -> str:
+def get_visible_role_for_com(game, target_id: int, users_map=None) -> str:
     roles = game.get("roles", {})
     effects = game.get("effects", {})
 
@@ -1187,14 +1126,13 @@ async def get_visible_role_for_com(game, target_id: int, users_map=None) -> str:
             user["docs"] -= 1
             user_qs.docs -= 1
             user_qs.save(update_fields=["docs"])
-            await game.save()
             # Assuming there's a mechanism to save the updated user data back to the database or game state
             return "peace"
 
     return real_role
 
 
-async def promote_new_don_if_needed(game):
+def promote_new_don_if_needed(game: dict):
     roles = game.get("roles", {})
     alive = set(game.get("alive", []))
 
@@ -1213,7 +1151,6 @@ async def promote_new_don_if_needed(game):
     new_don_id = mafia_candidates[0]  # xohlasangiz random ham qilsa bo'ladi
     roles[new_don_id] = "don"
     game["roles"] = roles
-    await game.save()
     return new_don_id
 
 
@@ -1250,7 +1187,7 @@ async def notify_new_don(game: dict, new_don_id: int):
 
 
 
-async def promote_new_com_if_needed(game: dict):
+def promote_new_com_if_needed(game: dict):
     roles = game.get("roles", {})
     alive = set(game.get("alive", []))
 
@@ -1265,7 +1202,6 @@ async def promote_new_com_if_needed(game: dict):
 
     roles[int(serg_id)] = "com"
     game["roles"] = roles
-    await game.save()
     return int(serg_id)
 
 async def notify_new_com(new_com_id: int):
@@ -1282,7 +1218,7 @@ async def notify_new_com(new_com_id: int):
 
 
 
-async def traitor_swap_roles(game: dict):
+def traitor_swap_roles(game: dict):
     roles = game.get("roles", {})
     alive = set(game.get("alive", []))
     night_actions = game.get("night_actions", {})
@@ -1314,55 +1250,41 @@ async def traitor_swap_roles(game: dict):
     roles[int(target_id)] = traitor_role
 
     game["roles"] = roles
-    await game.save()
     return int(traitor_id), int(target_id), target_role
 
 
+
 async def hero_day_actions(game_id: int):
-
-    game = await GameStorage.load(game_id)
-
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
 
     users_map = game.get("users_map", {})
     roles = game.get("roles", {})
     meta = game.get("meta", {})
-    alive = [int(x) for x in game.get("alive", [])]
-
     chat_id = meta.get("chat_id")
     day = meta.get("day")
-
-    hero_data = game.get("hero", {})
-    used = hero_data.get("used", [])
-    notified = hero_data.get("notified", [])
+    game["hero"].setdefault("notified", set())
 
     for tg_id, user in users_map.items():
-
         tg_id = int(tg_id)
-
-        if tg_id not in alive:
+        if tg_id not in game.get("alive", []):
             continue
-
         if not user.get("hero", False):
             continue
 
-        if tg_id in used:
+        if tg_id in game["hero"]["used"]:
             continue
 
-        if tg_id in notified:
-            continue
 
         role = roles.get(tg_id)
-
         t = get_lang_text(tg_id)
-
         if role in ["don", "com", "snyper"]:
             await send_safe_message(
                 chat_id=tg_id,
-                text=t["hero_day_action"],
+                text=t['hero_day_action'],
                 reply_markup=use_hero_inline_btn(
-                    attack=True,
+                    attack = True,
                     game_id=int(game_id),
                     chat_id=chat_id,
                     tg_id=tg_id,
@@ -1372,9 +1294,9 @@ async def hero_day_actions(game_id: int):
         else:
             await send_safe_message(
                 chat_id=tg_id,
-                text=t["hero_protect"],
+                text=t['hero_protect'],
                 reply_markup=use_hero_inline_btn(
-                    attack=False,
+                    attack = False,
                     game_id=int(game_id),
                     chat_id=chat_id,
                     tg_id=tg_id,
@@ -1382,18 +1304,13 @@ async def hero_day_actions(game_id: int):
                 )
             )
 
-        # 🔥 Redis-safe list
-        notified.append(tg_id)
-
-    hero_data["notified"] = notified
-    game["hero"] = hero_data
-
-    await game.save()
+        # ✅ belgilab qo‘yamiz
+        game["hero"]["notified"].add(tg_id)
 
 
 async def apply_night_actions(game_id: int):
-    game = await GameStorage.load(game_id)
-    if not game.data:
+    game = games_state.get(game_id)
+    if not game:
         return
 
     game.setdefault("allowed_to_send_message", [])
@@ -1439,7 +1356,7 @@ async def apply_night_actions(game_id: int):
 
     mafia_alive = any(roles.get(tg) in {"don", "mafia"} for tg in alive_ids)
     if mafia_alive:
-        mafia_target = get_mafia_kill_target(game)
+        mafia_target = get_mafia_kill_target(night_actions)
         if  mafia_target:
             add_intent(mafia_target, "don", priority=1)
             mafia_ids = get_mafia_members(game_id)
@@ -1535,10 +1452,9 @@ async def apply_night_actions(game_id: int):
             continue
 
         target_user = alive_users_map.get(int(target_id))
-        hero_data = game.setdefault("hero", {})
-        hero_used = hero_data.get("hero_used", {})
+        hero_used = game.setdefault("hero_used", {})
         if target_user and target_user.get("hero", False):
-            if not hero_used.get(target_id) and target_id in hero_data.get("self_protect", []):
+            if not hero_used.get(target_id) and target_id in hero_data.get("self_protect", set()):
                 hero_used[target_id] = True
                 t= get_lang_text(int(target_id))
                 tu = get_lang_text(int(chat_id))
@@ -1561,7 +1477,7 @@ async def apply_night_actions(game_id: int):
             continue
             
         if killer_by == "snyper":
-            await kill(game, target_id)
+            kill(game, target_id)
             dead_tonight.append((target_id, killer_by))
             continue
 
@@ -1582,11 +1498,11 @@ async def apply_night_actions(game_id: int):
 
         if roles.get(int(target_id)) == "kam":
             if killer_id and is_alive(game, killer_id):
-                await kill(game, killer_id)
+                kill(game, killer_id)
                 dead_tonight.append((killer_id, "kam"))
 
 
-        await kill(game, target_id)
+        kill(game, target_id)
         dead_tonight.append((target_id, killer_by))
     night_texts = []
     for target_id, killer_by in dead_tonight:
@@ -1667,26 +1583,26 @@ async def apply_night_actions(game_id: int):
 
         visible_role_key = get_visible_role_for_com(game, int(com_check_target), alive_users_map)
         visible_role_text = get_role_labels_lang(int(com_check_target)).get(visible_role_key, "👨🏼 Tinch axoli")
-        t= get_lang_text(int(com_check_target))
+        com= get_lang_text(int(com_check_target))
         try:
             await send_safe_message(
                 chat_id=int(com_check_target),
-                text=t["someone_interested"]
+                text=com["someone_interested"]
             )
-            t= get_lang_text(int(com_id))
-            text = t['com_check_result'].format(
+            target_lang= get_lang_text(int(com_id))
+            text = target_lang['com_check_result'].format(
                 target_name=target_name,
                 visible_role_text=visible_role_text,
                 com_check_target=com_check_target
             )
             await send_safe_message(
-                chat_id=com_id,
+                chat_id=int(com_id),
                 text=text,
                 parse_mode="HTML"
             )
             if serg_id and is_alive(game, serg_id):
                 await send_safe_message(
-                    chat_id=serg_id,
+                    chat_id=int(serg_id),
                     text=text,
                     parse_mode="HTML"
                 )
@@ -1742,7 +1658,7 @@ async def apply_night_actions(game_id: int):
     
     daydi_id = get_alive_role_id(game, "daydi")
     if daydi_id:
-        daydi_seen = await compute_daydi_seen(game)     
+        daydi_seen = compute_daydi_seen(game)     
         daydi_house_id = night_actions.get("daydi_house")
         if daydi_house_id:
             daydi_house_id = int(daydi_house_id)
@@ -1804,27 +1720,14 @@ async def apply_night_actions(game_id: int):
             )
         except Exception:
             pass
-    await game.save()
+
                 
-async def get_game_by_chat_id(chat_id: int):
-
+def get_game_by_chat_id(chat_id: int):
     chat_id = int(chat_id)
-
-    keys = await redis_client.keys("game:*")
-
-    for key in keys:
-        raw = await redis_client.get(key)
-        if not raw:
-            continue
-
-        data = json.loads(raw)
-        meta = data.get("meta", {})
-
-        if int(meta.get("chat_id", 0)) == chat_id:
-            game_id = int(key.split(":")[1])
-            return await GameStorage.load(game_id)
-
-    return None  
+    for game in games_state.values():
+        if game.get("meta", {}).get("chat_id") == chat_id:
+            return game
+    return False    
                 
                 
 def get_alive_teams(game):
@@ -1845,7 +1748,11 @@ def get_alive_teams(game):
             solo.append(tg_id)
 
     return mafia, peace, solo
-def check_game_over(game) -> str | None:
+def check_game_over(game_id: int) -> str | None:
+    game = games_state.get(game_id)
+    if not game:
+        return None
+
     alive = game.get("alive", [])
     if not alive:
         return "draw"
@@ -1909,11 +1816,11 @@ async def is_user_in_chat( user_id: int) -> bool:
 
 async def stop_game_if_needed(game_id: int):
     game_id = int(game_id)
-    game_state = await GameStorage.load(game_id)
-    if not game_state.data:
+    game_state = games_state.get(game_id)
+    if not game_state:
         return False
 
-    winner_key = check_game_over(game_state)
+    winner_key = check_game_over(game_id)
     if not winner_key:
         return False
 
@@ -2022,7 +1929,7 @@ async def stop_game_if_needed(game_id: int):
             pass
 
     # Cleanup
-    game_state.delete(game_id)
+    games_state.pop(game_id, None)
     writing_allowed_groups.pop(chat_id, None)
     game_tasks.pop(game_id, None)
 
@@ -2030,6 +1937,7 @@ async def stop_game_if_needed(game_id: int):
     if game_settings and game_settings.begin_after_end:
         from mafia_bot.handlers.command_handlers import auto_begin_game
         await auto_begin_game(chat_id)
+
     return True
 
 
@@ -2039,7 +1947,7 @@ def format_duration(seconds: int) -> str:
     return f"{m} min. {s} sek."
 
 async def build_final_game_text(game_id: int, winner_key: str) -> str:
-    game = await GameStorage.load(game_id)
+    game = games_state.get(game_id)
     if not game:
         return "O'yin tugadi."
 
@@ -2148,7 +2056,13 @@ async def mute_user(chat_id: int, user_id: int, seconds: int = 45):
         until_date=until_date
     )
     
-
+def is_player_in_game( tg_id: int) -> bool:
+    tg_id = int(tg_id)
+    for game in games_state.values():
+        players = game.get("players", [])
+        if tg_id in players:
+            return True
+    return False
     
 def get_game_lock(chat_id):
     if chat_id not in game_locks:

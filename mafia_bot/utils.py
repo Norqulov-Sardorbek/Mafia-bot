@@ -2,6 +2,7 @@ from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats, BotCommand
 from aiogram import Bot
 
 
+games_state = {}
 last_wishes = {}
 team_chat_sessions = {} 
 game_tasks = {}  # {uuid: asyncio.Task}

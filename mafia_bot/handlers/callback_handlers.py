@@ -9,16 +9,15 @@ from datetime import timedelta
 from django.db.models import Sum
 from django.utils import timezone
 from aiogram.filters import StateFilter
-from mafia_bot.storage import GameStorage
 from aiogram.fsm.context import FSMContext 
 from django.contrib.auth.hashers import make_password
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
-from mafia_bot.utils import stones_taken,gsend_taken,giveaways,USER_LANG_CACHE
+from mafia_bot.utils import stones_taken,gsend_taken,giveaways,games_state,USER_LANG_CACHE
 from aiogram.types import Message, LabeledPrice, PreCheckoutQuery,CallbackQuery
 from mafia_bot.models import Game, MoneySendHistory, User,PremiumGroup,MostActiveUser,CasesOpened,GameSettings,GroupTrials,PriceStones, UserRole,BotCredentials, default_end_date
 from mafia_bot.state import AddGroupState, BeginInstanceState,SendMoneyState,ChangeStoneCostState,ChangeMoneyCostState,ExtendGroupState,QuestionState,Register,CredentialsState
 from mafia_bot.handlers.main_functions import (add_visit, get_mafia_members,get_first_name_from_players, kill, remove_prefix,send_safe_message,get_description_lang,get_hero_level,
-                                                get_week_range,get_month_range,role_label,get_lang_text,get_role_labels_lang,get_actions_lang)
+                                               mark_confirm_done, mark_hang_done,mark_night_action_done,get_week_range,get_month_range,role_label,get_lang_text,get_role_labels_lang,get_actions_lang)
 from mafia_bot.buttons.inline import (action_inline_btn,
     admin_inline_btn, answer_admin, back_btn, cart_inline_btn, change_money_cost, change_stones_cost, com_inline_btn, end_talk_keyboard, geroy_inline_btn,  giveaway_join_btn, group_profile_inline_btn,
     groupes_keyboard, groups_buy_stars, history_groupes_keyboard, language_keyboard, language_keyboard, money_case, pay_for_money_inline_btn, pay_using_stars_inline_btn, role_shop_inline_keyboard,
@@ -448,8 +447,8 @@ async def doc_heal_callback(callback: CallbackQuery):
     day = parts[4]
     doctor_id = callback.from_user.id
 
-    game = await GameStorage.load(int(parts[2]))
-    if not game.data:
+    game = games_state.get(int(parts[2]))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -460,7 +459,7 @@ async def doc_heal_callback(callback: CallbackQuery):
     if not doctor_id in game["alive"]:
         return
     
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -486,7 +485,7 @@ async def doc_heal_callback(callback: CallbackQuery):
 
     # ✅ night action saqlash
     game["night_actions"]["doc_target"] = target_id
-    await  add_visit(game=game, visitor_id=doctor_id, house_id=target_id, invisible=False)
+    add_visit(game=game, visitor_id=doctor_id, house_id=target_id, invisible=False)
 
 
     # username olish (players object bo'lsa)
@@ -516,8 +515,8 @@ async def daydi_callback(callback: CallbackQuery):
 
     daydi_id = callback.from_user.id
 
-    game = await GameStorage.load(int(parts[2]))
-    if not game.data:
+    game = games_state.get(int(parts[2]))
+    if not game:
         return
     
     game_day = game['meta']['day']
@@ -528,7 +527,7 @@ async def daydi_callback(callback: CallbackQuery):
         return
     if not daydi_id in game["alive"]:
         return
-
+    mark_night_action_done(game, callback.from_user.id)
     if house_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -572,8 +571,8 @@ async def com_callback(callback: CallbackQuery):
     chat_id = int(parts[3])
     day = parts[4]
     com_id = callback.from_user.id
-    game = await GameStorage.load(int(parts[2]))
-    if not game.data:
+    game = games_state.get(int(parts[2]))
+    if not game:
         return
     if not com_id in game["alive"]:
         return
@@ -583,7 +582,7 @@ async def com_callback(callback: CallbackQuery):
     if not day == str(game_day):
         await callback.message.edit_text(text=f"{get_actions_lang(callback.from_user.id).get('com_deside')}\n\n{t['late']}", parse_mode="HTML")
         return
-
+    mark_night_action_done(game, callback.from_user.id)
     if action == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -612,7 +611,7 @@ async def com_callback(callback: CallbackQuery):
             pass
         await callback.message.edit_text(
             text=get_actions_lang(callback.from_user.id).get("com_shoot"),
-            reply_markup=await com_inline_action_btn(action="shoot",chat_id=chat_id, game_id=int(parts[2]),com_id=com_id,day=day)
+            reply_markup=com_inline_action_btn(action="shoot",chat_id=chat_id, game_id=int(parts[2]),com_id=com_id,day=day)
         )
         return
 
@@ -622,7 +621,7 @@ async def com_callback(callback: CallbackQuery):
         pass
     await callback.message.edit_text(
         text=get_actions_lang(callback.from_user.id).get("com_check"),
-        reply_markup=await com_inline_action_btn(action="search",chat_id=chat_id, game_id=int(parts[2]),com_id=com_id,day=day)
+        reply_markup=com_inline_action_btn(action="search",chat_id=chat_id, game_id=int(parts[2]),com_id=com_id,day=day)
     )
 
 
@@ -636,9 +635,9 @@ async def com_shoot_callback(callback: CallbackQuery):
 
     com_id = callback.from_user.id
 
-    game = await GameStorage.load(int(parts[2]))
+    game = games_state.get(int(parts[2]))
     day = parts[3]
-    if not game.data:
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -650,7 +649,7 @@ async def com_shoot_callback(callback: CallbackQuery):
     
 
     game["night_actions"]["com_shoot_target"] = target_id
-    await add_visit(game, com_id, target_id, False)
+    add_visit(game, com_id, target_id, False)
 
 
     target_name = get_first_name_from_players( target_id)
@@ -670,8 +669,8 @@ async def com_protect_callback(callback: CallbackQuery):
     day = parts[3]
     com_id = callback.from_user.id
 
-    game = await GameStorage.load(int(parts[2]))
-    if not game.data:
+    game = games_state.get(int(parts[2]))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -684,7 +683,7 @@ async def com_protect_callback(callback: CallbackQuery):
 
     # ✅ Action saqlaymiz
     game["night_actions"]["com_check_target"] = target_id
-    await add_visit(game, com_id, target_id, False)
+    add_visit(game, com_id, target_id, False)
 
 
     target_name = get_first_name_from_players( target_id)
@@ -706,8 +705,8 @@ async def lover_callback(callback: CallbackQuery):
     day = parts[4]
     lover_id = callback.from_user.id
 
-    game = await GameStorage.load(int(parts[2]))
-    if not game.data:
+    game = games_state.get(int(parts[2]))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -717,7 +716,7 @@ async def lover_callback(callback: CallbackQuery):
         return
     if not lover_id in game["alive"]:
         return
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -735,7 +734,7 @@ async def lover_callback(callback: CallbackQuery):
     target_id = int(target_id)
     # ✅ lover action saqlash
     game["night_actions"]["lover_block_target"] = target_id
-    await add_visit(game=game, visitor_id=lover_id, house_id=target_id, invisible=False)
+    add_visit(game=game, visitor_id=lover_id, house_id=target_id, invisible=False)
 
     target_name = get_first_name_from_players(target_id)
 
@@ -760,8 +759,8 @@ async def killer_callback(callback: CallbackQuery):
     day = parts[4]
     killer_id = callback.from_user.id
 
-    game = await GameStorage.load(int(parts[2]))
-    if not game.data:
+    game = games_state.get(int(parts[2]))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -771,7 +770,7 @@ async def killer_callback(callback: CallbackQuery):
         return
     if not killer_id in game["alive"]:
         return
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -788,7 +787,7 @@ async def killer_callback(callback: CallbackQuery):
     game["night_actions"]["killer_target"].append(target_id)
 
     target_name = get_first_name_from_players(target_id)
-    await add_visit(game=game, visitor_id=killer_id, house_id=target_id, invisible=False)
+    add_visit(game=game, visitor_id=killer_id, house_id=target_id, invisible=False)
 
     text = f"{get_actions_lang(callback.from_user.id).get('killer_kill')}\n\n<a href='tg://user?id={target_id}'>{target_name}</a> {t['action_choose']}."
 
@@ -811,8 +810,8 @@ async def santa_callback(callback: CallbackQuery):
     day = parts[4]
     santa_id = callback.from_user.id
 
-    game = await GameStorage.load(int(parts[2]))
-    if not game.data:
+    game = games_state.get(int(parts[2]))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -822,7 +821,7 @@ async def santa_callback(callback: CallbackQuery):
         return
     if not santa_id in game["alive"]:
         return
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -847,7 +846,7 @@ async def santa_callback(callback: CallbackQuery):
     user.coin += 20
     user.save()
     target_name = get_first_name_from_players(target_id)
-    await add_visit(game=game, visitor_id=santa_id, house_id=target_id, invisible=False)
+    add_visit(game=game, visitor_id=santa_id, house_id=target_id, invisible=False)
 
     text = f"{get_actions_lang(callback.from_user.id).get('santa')}\n\n<a href='tg://user?id={target_id}'>{target_name}</a> {t['action_choose']}."
 
@@ -873,8 +872,8 @@ async def kaldun_callback(callback: CallbackQuery):
     day = parts[4]
     kaldun_id = callback.from_user.id
 
-    game = await GameStorage.load(int(parts[2]))
-    if not game.data:
+    game = games_state.get(int(parts[2]))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -884,7 +883,7 @@ async def kaldun_callback(callback: CallbackQuery):
         return
     if not kaldun_id in game["alive"]:
         return
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -902,7 +901,7 @@ async def kaldun_callback(callback: CallbackQuery):
     # ✅ kaldun action saqlash
     game["night_actions"]["kaldun_target"] = target_id
     
-    await add_visit(game=game, visitor_id=kaldun_id, house_id=target_id, invisible=False)
+    add_visit(game=game, visitor_id=kaldun_id, house_id=target_id, invisible=False)
     target_name = get_first_name_from_players(target_id)
 
     text = f"{get_actions_lang(callback.from_user.id).get('kaldun_spell')}\n\n<a href='tg://user?id={target_id}'>{target_name}</a> {t['action_choose']}."
@@ -927,8 +926,8 @@ async def drunk_callback(callback: CallbackQuery):
     day = parts[4]
     drunk_id = callback.from_user.id
 
-    game = await GameStorage.load(game_id)
-    if not game.data:
+    game = games_state.get(game_id)
+    if not game:
         return
     t = get_lang_text(drunk_id)
     tu = get_lang_text(chat_id)
@@ -942,6 +941,7 @@ async def drunk_callback(callback: CallbackQuery):
     if drunk_id not in game["alive"]:
         return
 
+    mark_night_action_done(game, drunk_id)
     await callback.message.edit_reply_markup(None)
 
     if target_raw == "no":
@@ -959,7 +959,7 @@ async def drunk_callback(callback: CallbackQuery):
 
     # 🔒 GAME LOGIC — O‘ZGARMAGAN
     game["night_actions"]["drunk_target"] = target_id
-    await add_visit(game=game, visitor_id=drunk_id, house_id=target_id, invisible=False)
+    add_visit(game=game, visitor_id=drunk_id, house_id=target_id, invisible=False)
 
     target_name = get_first_name_from_players(target_id)
 
@@ -984,9 +984,9 @@ async def don_callback(callback: CallbackQuery):
     
     don_id = callback.from_user.id
     
-    game = await GameStorage.load(int(game_id))
+    game = games_state.get(int(game_id))
     
-    if not game.data:
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -997,7 +997,7 @@ async def don_callback(callback: CallbackQuery):
     if not don_id in game["alive"]:
         return
     
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1009,7 +1009,7 @@ async def don_callback(callback: CallbackQuery):
     
     # ✅ night action saqlash
     game["night_actions"]["don_kill_target"] = int(target_id)
-    await add_visit(game=game, visitor_id=don_id, house_id=target_id, invisible=False)
+    add_visit(game=game, visitor_id=don_id, house_id=target_id, invisible=False)
     
     
     target_name = get_first_name_from_players(int(target_id))
@@ -1046,8 +1046,8 @@ async def mafia_callback(callback: CallbackQuery):
     
     mafia_id = callback.from_user.id
     
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -1057,7 +1057,7 @@ async def mafia_callback(callback: CallbackQuery):
     
     if not mafia_id in game["alive"]:
         return
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1104,8 +1104,8 @@ async def adv_callback(callback: CallbackQuery):
     day = callback.data.split("_")[4]
     adv_id = callback.from_user.id
     
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -1116,7 +1116,7 @@ async def adv_callback(callback: CallbackQuery):
     
     if not adv_id in game["alive"]:
         return
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1130,7 +1130,7 @@ async def adv_callback(callback: CallbackQuery):
         return
     # ✅ night action saqlash
     game["night_actions"]["advokat_target"] = int(target_id)
-    await add_visit(game=game, visitor_id=adv_id, house_id=target_id, invisible=False)
+    add_visit(game=game, visitor_id=adv_id, house_id=target_id, invisible=False)
     
     await send_safe_message(
         chat_id=int(chat_id),
@@ -1173,8 +1173,8 @@ async def spy_callback(callback: CallbackQuery):
     day = callback.data.split("_")[4]
     spy_id = callback.from_user.id
     
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -1185,7 +1185,7 @@ async def spy_callback(callback: CallbackQuery):
     
     if not spy_id in game["alive"]:
         return
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1200,7 +1200,7 @@ async def spy_callback(callback: CallbackQuery):
     
     # ✅ night action saqlash
     game["night_actions"]["spy_target"] = int(target_id)
-    await add_visit(game=game, visitor_id=spy_id, house_id=target_id, invisible=False)
+    add_visit(game=game, visitor_id=spy_id, house_id=target_id, invisible=False)
     
     await send_safe_message(
         chat_id=int(chat_id),
@@ -1241,8 +1241,8 @@ async def lab_callback(callback: CallbackQuery):
     
     lab_id = callback.from_user.id
     
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -1253,7 +1253,7 @@ async def lab_callback(callback: CallbackQuery):
     
     if not lab_id in game["alive"]:
         return
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1268,7 +1268,7 @@ async def lab_callback(callback: CallbackQuery):
     
     # ✅ night action saqlash
     game["night_actions"]["lab_target"] = int(target_id)
-    await add_visit(game=game, visitor_id=lab_id, house_id=target_id, invisible=False)
+    add_visit(game=game, visitor_id=lab_id, house_id=target_id, invisible=False)
     
     await send_safe_message(
         chat_id=int(chat_id),
@@ -1291,8 +1291,8 @@ async def arrow_callback(callback: CallbackQuery):
     
     arrow_id = callback.from_user.id
     
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -1304,7 +1304,7 @@ async def arrow_callback(callback: CallbackQuery):
     if not arrow_id in game["alive"]:
         return
     
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1318,7 +1318,7 @@ async def arrow_callback(callback: CallbackQuery):
         return
     # ✅ night action saqlash
     game["night_actions"]["arrow_target"] = int(target_id)
-    await add_visit(game=game, visitor_id=arrow_id, house_id=target_id, invisible=True)
+    add_visit(game=game, visitor_id=arrow_id, house_id=target_id, invisible=True)
     
     await send_safe_message(
         chat_id=int(chat_id),
@@ -1341,8 +1341,8 @@ async def trap_callback(callback: CallbackQuery):
     
     trap_id = callback.from_user.id
     
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -1353,7 +1353,7 @@ async def trap_callback(callback: CallbackQuery):
     
     if not trap_id in game["alive"]:
         return
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1390,8 +1390,8 @@ async def snyper_callback(callback: CallbackQuery):
     
     snyper_id = callback.from_user.id
     
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -1403,7 +1403,7 @@ async def snyper_callback(callback: CallbackQuery):
     if not snyper_id in game["alive"]:
         return
     
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1418,7 +1418,7 @@ async def snyper_callback(callback: CallbackQuery):
     
     # ✅ night action saqlash
     game["night_actions"]["snyper_target"] = int(target_id)
-    await add_visit(game=game, visitor_id=snyper_id, house_id=target_id, invisible=True)
+    add_visit(game=game, visitor_id=snyper_id, house_id=target_id, invisible=True)
     
     await send_safe_message(
         chat_id=int(chat_id),
@@ -1441,8 +1441,8 @@ async def spy_callback(callback: CallbackQuery):
     day = callback.data.split("_")[4]
     
     traitor_id = callback.from_user.id
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -1453,7 +1453,7 @@ async def spy_callback(callback: CallbackQuery):
     if not traitor_id in game["alive"]:
         return
     
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1468,7 +1468,7 @@ async def spy_callback(callback: CallbackQuery):
     
     # ✅ night action saqlash
     game["night_actions"]["traitor_target"] = int(target_id)
-    await add_visit(game=game, visitor_id=traitor_id, house_id=target_id, invisible=False)
+    add_visit(game=game, visitor_id=traitor_id, house_id=target_id, invisible=False)
     await send_safe_message(
         chat_id=int(chat_id),
         text=tg['traitor_go']
@@ -1488,8 +1488,8 @@ async def snowball_callback(callback: CallbackQuery):
     day = callback.data.split("_")[4]
     
     snowball_id = callback.from_user.id
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -1500,7 +1500,7 @@ async def snowball_callback(callback: CallbackQuery):
     if not snowball_id in game["alive"]:
         return
     
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1515,7 +1515,7 @@ async def snowball_callback(callback: CallbackQuery):
     
     # ✅ night action saqlash
     game["night_actions"]["snowball_target"] = int(target_id)
-    await add_visit(game=game, visitor_id=snowball_id, house_id=target_id, invisible=False)
+    add_visit(game=game, visitor_id=snowball_id, house_id=target_id, invisible=False)
     await send_safe_message(
         chat_id=int(chat_id),
         text=tg['snowball_go']
@@ -1534,8 +1534,8 @@ async def pirate_callback(callback: CallbackQuery):
     chat_id = int(callback.data.split("_")[3])
     pirate_id = callback.from_user.id
     day = callback.data.split("_")[4]
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -1546,7 +1546,7 @@ async def pirate_callback(callback: CallbackQuery):
     if not pirate_id in game["alive"]:
         return
     
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1563,7 +1563,7 @@ async def pirate_callback(callback: CallbackQuery):
     game["night_actions"]["pirate"]['target_id'] = int(target_id)
     game["night_actions"]["pirate"]['pirate_id'] = int(pirate_id)
     game["night_actions"]["pirate"]['result'] = "no"
-    await add_visit(game=game, visitor_id=pirate_id, house_id=target_id, invisible=False)
+    add_visit(game=game, visitor_id=pirate_id, house_id=target_id, invisible=False)
 
     await send_safe_message(
         chat_id=int(target_id),
@@ -1587,8 +1587,8 @@ async def pirpay_callback(callback: CallbackQuery):
     pirate_id = int(parts[2])
     game_id = int(parts[3])
     day = parts[4]
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -1645,8 +1645,8 @@ async def professor_callback(callback: CallbackQuery):
     
     professor_id = callback.from_user.id
     
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -1657,7 +1657,7 @@ async def professor_callback(callback: CallbackQuery):
     
     if not professor_id in game["alive"]:
         return
-
+    mark_night_action_done(game, callback.from_user.id)
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1673,7 +1673,7 @@ async def professor_callback(callback: CallbackQuery):
     # ✅ night action saqlash
     game["night_actions"]["professor"]['target_id'] = int(target_id)
     game["night_actions"]["professor"]['chosen'] = "die"
-    await add_visit(game=game, visitor_id=professor_id, house_id=target_id, invisible=False)
+    add_visit(game=game, visitor_id=professor_id, house_id=target_id, invisible=False)
     
     await send_safe_message(
         chat_id=int(chat_id),
@@ -1701,8 +1701,8 @@ async def prof_callback(callback: CallbackQuery):
     professor_id = int(parts[4])
     chat_id = int(parts[5])
     prof_id = callback.from_user.id
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -1735,6 +1735,7 @@ async def prof_callback(callback: CallbackQuery):
             
         game["night_actions"]["professor"]['chosen'] = "hero"
     
+    mark_night_action_done(game, callback.from_user.id)
     
     await callback.message.edit_text(text=t['prof_chosen'].format(reward=reward))
     await send_safe_message(
@@ -1752,8 +1753,8 @@ async def hang_callback(callback: CallbackQuery):
     day = callback.data.split("_")[4]
     shooter_id = callback.from_user.id
     shooter_name = callback.from_user.first_name
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     game_day = game['meta']['day']
     t = get_lang_text(callback.from_user.id)
@@ -1771,6 +1772,7 @@ async def hang_callback(callback: CallbackQuery):
         return
     
     game["day_actions"]['votes'].append(int(target_id))
+    mark_hang_done(int(game_id), callback.from_user.id)
     
     user_map = game.get("users_map",{})
     user = user_map.get(int(target_id))
@@ -1789,8 +1791,8 @@ async def confirm_callback(callback: CallbackQuery):
     game_id = int(parts[3])
     chat_id = int(parts[4])
     voter_id = callback.from_user.id
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     t = get_lang_text(callback.from_user.id)
     if not voter_id in game["alive"]:
@@ -1825,6 +1827,7 @@ async def confirm_callback(callback: CallbackQuery):
         if voter_id in game["day_actions"]["hang_yes"]:
             game["day_actions"]["hang_yes"].remove(voter_id)
     
+    mark_confirm_done(int(game_id), voter_id)
     
     
     await callback.answer(text=t['vote_accepted'])
@@ -1835,8 +1838,8 @@ async def confirm_callback(callback: CallbackQuery):
     
     
 async def update_hang_votes(voter_id,game_id: int, chat_id: int, yes: int, no: int):
-    game = await GameStorage.load(int(game_id))
-    if not game.data:
+    game = games_state.get(int(game_id))
+    if not game:
         return
     msg_id = game['day_actions']['hang_confirm_msg_id']
     try:
@@ -3305,7 +3308,7 @@ async def take_gsend_stone(callback: CallbackQuery):
     if not game_db:
         return
     
-    game = await GameStorage.load(game_db.id)
+    game = games_state[game_db.id]
     players = game.get("players",[]) if game else None
     if not  players :
         await callback.answer("❌ O‘yin topilmadi.", show_alert=True)
@@ -3655,8 +3658,8 @@ async def hero_callback(callback: CallbackQuery):
     hero_id = callback.from_user.id
     day = int(day)
 
-    game = await GameStorage.load(game_id)
-    if not game.data:
+    game = games_state.get(game_id)
+    if not game:
         return
 
     current_day = game['meta']['day']
@@ -3707,8 +3710,8 @@ async def day_attack_callback(callback: CallbackQuery):
     if target_id == "no":
         return
     target_id = int(target_id)
-    game = await GameStorage.load(game_id)
-    if not game.data:
+    game = games_state.get(game_id)
+    if not game:
         return
 
     if game["meta"]["day"] != day:
@@ -3749,7 +3752,7 @@ async def day_attack_callback(callback: CallbackQuery):
 
     # ☠ kill condition
     if hp_left <= 0:
-        await kill(game, target_id)
+        kill(game, target_id)
         role_target = role_label(game['roles'].get(target_id), chat_id)
 
         await send_safe_message(

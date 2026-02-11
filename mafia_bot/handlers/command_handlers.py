@@ -15,10 +15,9 @@ from django.contrib.auth.hashers import check_password
 from mafia_bot.handlers.game_handler import run_game_in_background
 from mafia_bot.handlers.callback_handlers import begin_instance_callback
 from mafia_bot.models import Game, GroupTrials, MostActiveUser,User,BotMessages,GameSettings, UserRole,default_end_date,BotCredentials,LoginAttempts
-from mafia_bot.storage import GameStorage
-from mafia_bot.utils import last_wishes,team_chat_sessions,game_tasks,group_users,stones_taken,gsend_taken,giveaways,notify_users,active_role_used,writing_allowed_groups
+from mafia_bot.utils import last_wishes,team_chat_sessions,game_tasks,group_users,stones_taken,gsend_taken,games_state,giveaways,notify_users,active_role_used,writing_allowed_groups
 from mafia_bot.handlers.main_functions import (MAFIA_ROLES, find_game,create_main_messages, get_lang_text,
-                                               kill, notify_new_don, promote_new_com_if_needed,get_game_lock,
+                                               kill, notify_new_don, promote_new_com_if_needed,get_game_lock,is_player_in_game,
                                                promote_new_don_if_needed,  shuffle_roles ,check_bot_rights,
                                                role_label,is_group_admin,mute_user,has_link,parse_amount,get_game_by_chat_id,get_description_lang,get_role_labels_lang,
                                                send_safe_message,notify_new_com)
@@ -75,14 +74,14 @@ async def start(message: Message) -> None:
         #     await message.reply(text=t['already_in_another_game'])
         #     return
         
-        result = await find_game(game.id,tg_id,game.chat_id,user)
+        result = find_game(game.id,tg_id,game.chat_id,user)
         if result.get("message") == "already_in":
             await message.reply(text=t['already_in_game'])
         elif result.get("message") in ("joined","full"):
             trial = GroupTrials.objects.filter(group_id=game.chat_id).first()
             group_name = trial.group_name if trial else ""
             await message.reply(text=t['joined_game'].format(group_name=group_name))
-            result_2 = await create_main_messages(game.id,game.chat_id)
+            result_2 = create_main_messages(game.id,game.chat_id)
             bot_message=BotMessages.objects.filter(game_id=game.id,is_main=True,is_deleted=False).first()
             if bot_message:
                 try:
@@ -300,8 +299,8 @@ async def gsend_command(message: Message) -> None:
     if not game:
         await message.answer("❌ O'yin boshlanmagan.")
         return
-    game = await GameStorage.load(game.id)
-    if not game.data or not game.get("players"):
+    game = games_state.get(game.id)
+    if not game or not game.get("players"):
         await message.answer("❌ O'yin boshlanmagan yoki o'yinchilar yo'q.")
         return
     if sender.stones < amount:
@@ -487,12 +486,12 @@ async def leave(message: Message) -> None:
     if not game_db or not game_db.is_started:
         return
     
-    game = await GameStorage.load(game_db.id)
-    if not game.data:
+    game = games_state.get(game_db.id)
+    if not game:
         return
     if tg_id not in game.get("alive", []):
         return
-    await kill(game,tg_id)
+    kill(game,tg_id)
     user = User.objects.filter(telegram_id=tg_id).first()
     if not user:
         return
@@ -606,7 +605,7 @@ async def stop_registration(game_id=None, chat_id=None, instant=False):
     else:
         game = Game.objects.filter(chat_id=chat_id, is_active_game=True, is_started=False).first()
 
-    all_players = (await GameStorage.load(game.id)).get("players", [])
+    all_players = games_state.get(game.id, {}).get("players", [])
     players_count = len(all_players)
 
     timer = registration_timers.pop(game.id, None)
@@ -708,7 +707,10 @@ async def game_command(message: Message) -> None:
                 if bot_message:
                     message_ids = [m.message_id for m in bot_message if m]
                     if message_ids:
-                        await bot.delete_messages(chat_id=chat_id,message_ids=message_ids)
+                        try:
+                            await bot.delete_messages(chat_id=chat_id,message_ids=message_ids)
+                        except Exception:
+                            pass
                     bot_message.update(is_deleted=True)
                 msg = await message.answer(text=text_begining,reply_markup=join_game_btn(str(game.uuid), chat_id))
                 await bot.pin_chat_message(chat_id=chat_id,message_id=msg.message_id)
@@ -863,9 +865,7 @@ async def stop_command(message: Message) -> None:
         game_reg.save()
 
     # RAM dan o'chiramiz
-    game = await GameStorage.load(game_reg.id)
-    if game.data:
-        game.delete()
+    games_state.pop(game_reg.id, None)
     writing_allowed_groups.pop(game_reg.chat_id, None)
     task = game_tasks.get(game_reg.id)
     if task and not task.done():
@@ -889,18 +889,18 @@ async def admin_moderation_commands(message: Message) -> None:
         game_db = Game.objects.filter(chat_id=chat_id, is_active_game=True).first()
         if not game_db:
             return
-        game = await GameStorage.load(game_db.id)
-        if game.data:
-            await kill(game,message.reply_to_message.from_user.id)
+        game = games_state.get(game_db.id)
+        if game is not None:
+            kill(game,message.reply_to_message.from_user.id)
             await send_safe_message(chat_id=message.reply_to_message.from_user.id,text="🔇 Siz o'yindan chetlatildingiz!")
         return
     tg_id = message.text.split(' ')[1]
     game_db = Game.objects.filter(chat_id=chat_id, is_active_game=True).first()
     if not game_db:
         return
-    game = await GameStorage.load(game_db.id)
-    if game.data:
-        await kill(game,int(tg_id))
+    game = games_state.get(game_db.id)
+    if game is not None:
+        kill(game,int(tg_id))
         await send_safe_message(chat_id=message.reply_to_message.from_user.id,text="🔇 Siz o'yindan chetlatildingiz!")
     return
 
@@ -1018,7 +1018,7 @@ async def share_command(message: Message) -> None:
     await message.answer("Do'stlarni chaqirish uchun /share buyrug'idan foydalaning.")
     
 async def send_mafia_companions(game_id, chat_id):
-    game = await GameStorage.load(game_id)
+    game = games_state.get(int(game_id), {})
     players = game.get("players", [])
     roles_map = game.get("roles", {})
     users_map = game.get("users_map", {})
@@ -1050,7 +1050,7 @@ async def send_mafia_companions(game_id, chat_id):
 
 
 async def sergant_send_companions(game_id, chat_id):
-    game = await GameStorage.load(game_id)
+    game = games_state.get(int(game_id), {})
     players = game.get("players", [])
     roles_map = game.get("roles", {})
     users_map = game.get("users_map", {})
@@ -1081,7 +1081,7 @@ async def sergant_send_companions(game_id, chat_id):
 
 
 async def send_roles(game_id, chat_id):
-    game = await GameStorage.load(game_id)
+    game = games_state.get(game_id, {})
     game_players = game.get("players", [])
     roles_map = game.get("roles", {})  
 
@@ -1132,7 +1132,7 @@ async def delete_not_alive_messages(message: Message):
             pass
         return
     
-    game = await get_game_by_chat_id(int(chat_id))
+    game = get_game_by_chat_id(int(chat_id))
     if not game or game.get("meta", {}).get("is_active_game") is not True:
         print("No active game in this chat")
         return 
@@ -1226,7 +1226,7 @@ async def private_router(message: Message,state: FSMContext) -> None:
     if not team_chat_id:
         return
 
-    game = await get_game_by_chat_id(int(team_chat_id))
+    game = get_game_by_chat_id(int(team_chat_id))
     if not game:
         return
 
