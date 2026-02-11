@@ -18,7 +18,7 @@ from aiogram.types import Message, LabeledPrice, PreCheckoutQuery,CallbackQuery
 from mafia_bot.models import Game, MoneySendHistory, User,PremiumGroup,MostActiveUser,CasesOpened,GameSettings,GroupTrials,PriceStones, UserRole,BotCredentials, default_end_date
 from mafia_bot.state import AddGroupState, BeginInstanceState,SendMoneyState,ChangeStoneCostState,ChangeMoneyCostState,ExtendGroupState,QuestionState,Register,CredentialsState
 from mafia_bot.handlers.main_functions import (add_visit, get_mafia_members,get_first_name_from_players, kill, remove_prefix,send_safe_message,get_description_lang,get_hero_level,
-                                                mark_night_action_done,get_week_range,get_month_range,role_label,get_lang_text,get_role_labels_lang,get_actions_lang)
+                                                get_week_range,get_month_range,role_label,get_lang_text,get_role_labels_lang,get_actions_lang)
 from mafia_bot.buttons.inline import (action_inline_btn,
     admin_inline_btn, answer_admin, back_btn, cart_inline_btn, change_money_cost, change_stones_cost, com_inline_btn, end_talk_keyboard, geroy_inline_btn,  giveaway_join_btn, group_profile_inline_btn,
     groupes_keyboard, groups_buy_stars, history_groupes_keyboard, language_keyboard, language_keyboard, money_case, pay_for_money_inline_btn, pay_using_stars_inline_btn, role_shop_inline_keyboard,
@@ -460,7 +460,7 @@ async def doc_heal_callback(callback: CallbackQuery):
     if not doctor_id in game["alive"]:
         return
     
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -528,7 +528,7 @@ async def daydi_callback(callback: CallbackQuery):
         return
     if not daydi_id in game["alive"]:
         return
-    mark_night_action_done(game, callback.from_user.id)
+
     if house_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -583,7 +583,7 @@ async def com_callback(callback: CallbackQuery):
     if not day == str(game_day):
         await callback.message.edit_text(text=f"{get_actions_lang(callback.from_user.id).get('com_deside')}\n\n{t['late']}", parse_mode="HTML")
         return
-    mark_night_action_done(game, callback.from_user.id)
+
     if action == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -717,7 +717,7 @@ async def lover_callback(callback: CallbackQuery):
         return
     if not lover_id in game["alive"]:
         return
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -771,7 +771,7 @@ async def killer_callback(callback: CallbackQuery):
         return
     if not killer_id in game["alive"]:
         return
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -822,7 +822,7 @@ async def santa_callback(callback: CallbackQuery):
         return
     if not santa_id in game["alive"]:
         return
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -884,7 +884,7 @@ async def kaldun_callback(callback: CallbackQuery):
         return
     if not kaldun_id in game["alive"]:
         return
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -942,7 +942,6 @@ async def drunk_callback(callback: CallbackQuery):
     if drunk_id not in game["alive"]:
         return
 
-    mark_night_action_done(game, drunk_id)
     await callback.message.edit_reply_markup(None)
 
     if target_raw == "no":
@@ -998,7 +997,7 @@ async def don_callback(callback: CallbackQuery):
     if not don_id in game["alive"]:
         return
     
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1058,7 +1057,7 @@ async def mafia_callback(callback: CallbackQuery):
     
     if not mafia_id in game["alive"]:
         return
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1117,7 +1116,7 @@ async def adv_callback(callback: CallbackQuery):
     
     if not adv_id in game["alive"]:
         return
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1186,7 +1185,7 @@ async def spy_callback(callback: CallbackQuery):
     
     if not spy_id in game["alive"]:
         return
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1254,7 +1253,7 @@ async def lab_callback(callback: CallbackQuery):
     
     if not lab_id in game["alive"]:
         return
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1305,7 +1304,7 @@ async def arrow_callback(callback: CallbackQuery):
     if not arrow_id in game["alive"]:
         return
     
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1354,7 +1353,7 @@ async def trap_callback(callback: CallbackQuery):
     
     if not trap_id in game["alive"]:
         return
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1404,7 +1403,7 @@ async def snyper_callback(callback: CallbackQuery):
     if not snyper_id in game["alive"]:
         return
     
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1454,7 +1453,7 @@ async def spy_callback(callback: CallbackQuery):
     if not traitor_id in game["alive"]:
         return
     
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1501,7 +1500,7 @@ async def snowball_callback(callback: CallbackQuery):
     if not snowball_id in game["alive"]:
         return
     
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1547,7 +1546,7 @@ async def pirate_callback(callback: CallbackQuery):
     if not pirate_id in game["alive"]:
         return
     
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
@@ -1658,7 +1657,7 @@ async def professor_callback(callback: CallbackQuery):
     
     if not professor_id in game["alive"]:
         return
-    mark_night_action_done(game, callback.from_user.id)
+
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
