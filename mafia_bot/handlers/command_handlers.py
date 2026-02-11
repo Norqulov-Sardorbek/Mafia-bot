@@ -75,14 +75,14 @@ async def start(message: Message) -> None:
         #     await message.reply(text=t['already_in_another_game'])
         #     return
         
-        result = find_game(game.id,tg_id,game.chat_id,user)
+        result = await find_game(game.id,tg_id,game.chat_id,user)
         if result.get("message") == "already_in":
             await message.reply(text=t['already_in_game'])
         elif result.get("message") in ("joined","full"):
             trial = GroupTrials.objects.filter(group_id=game.chat_id).first()
             group_name = trial.group_name if trial else ""
             await message.reply(text=t['joined_game'].format(group_name=group_name))
-            result_2 = create_main_messages(game.id,game.chat_id)
+            result_2 = await create_main_messages(game.id,game.chat_id)
             bot_message=BotMessages.objects.filter(game_id=game.id,is_main=True,is_deleted=False).first()
             if bot_message:
                 try:
