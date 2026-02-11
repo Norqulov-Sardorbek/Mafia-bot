@@ -10,8 +10,8 @@ from aiogram.types import FSInputFile
 from aiogram.exceptions import TelegramRetryAfter
 from mafia_bot.utils import game_tasks,writing_allowed_groups
 from mafia_bot.buttons.inline import confirm_hang_inline_btn, go_to_bot_inline_btn,action_inline_btn
-from mafia_bot.handlers.main_functions import (can_hang,  get_most_voted_id,night_reset,day_reset, notify_new_com, notify_new_don, prepare_confirm_pending,
-                                               prepare_hang_pending, prepare_night_pending, promote_new_com_if_needed, promote_new_don_if_needed, punish_afk_night_players,send_night_actions_to_all,send_safe_message,
+from mafia_bot.handlers.main_functions import (can_hang,  get_most_voted_id,night_reset,day_reset, notify_new_com, notify_new_don, 
+                                                 promote_new_com_if_needed, promote_new_don_if_needed, punish_afk_night_players,send_night_actions_to_all,send_safe_message,
                                                apply_night_actions, stop_game_if_needed,PEACE_ROLES,MAFIA_ROLES_LAB,SOLO_ROLES,hero_day_actions,get_lang_text,get_role_labels_lang)
 
 
@@ -125,7 +125,6 @@ async def start_game(game_id):
                 parse_mode="HTML"
             )
 
-            prepare_night_pending(game_id)
     
             await asyncio.sleep(60)
             
@@ -312,7 +311,6 @@ async def start_game(game_id):
                 except Exception:
                     pass
 
-            prepare_hang_pending(game_id)
 
             await asyncio.sleep(45)
             await asyncio.sleep(1)
@@ -362,7 +360,6 @@ async def start_game(game_id):
             game_data["day_actions"]["hang_target_id"] = voted_user.get('tg_id')
             await game_data.save()
 
-            prepare_confirm_pending(game_id,voted_user.get('tg_id'))
 
             await asyncio.sleep(45)
 
