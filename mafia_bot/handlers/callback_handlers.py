@@ -18,7 +18,7 @@ from aiogram.types import Message, LabeledPrice, PreCheckoutQuery,CallbackQuery
 from mafia_bot.models import Game, MoneySendHistory, User,PremiumGroup,MostActiveUser,CasesOpened,GameSettings,GroupTrials,PriceStones, UserRole,BotCredentials, default_end_date
 from mafia_bot.state import AddGroupState, BeginInstanceState,SendMoneyState,ChangeStoneCostState,ChangeMoneyCostState,ExtendGroupState,QuestionState,Register,CredentialsState
 from mafia_bot.handlers.main_functions import (add_visit, get_mafia_members,get_first_name_from_players, kill, remove_prefix,send_safe_message,get_description_lang,get_hero_level,
-                                               mark_confirm_done, mark_hang_done,mark_night_action_done,get_week_range,get_month_range,role_label,get_lang_text,get_role_labels_lang,get_actions_lang)
+                                                mark_hang_done,mark_night_action_done,get_week_range,get_month_range,role_label,get_lang_text,get_role_labels_lang,get_actions_lang)
 from mafia_bot.buttons.inline import (action_inline_btn,
     admin_inline_btn, answer_admin, back_btn, cart_inline_btn, change_money_cost, change_stones_cost, com_inline_btn, end_talk_keyboard, geroy_inline_btn,  giveaway_join_btn, group_profile_inline_btn,
     groupes_keyboard, groups_buy_stars, history_groupes_keyboard, language_keyboard, language_keyboard, money_case, pay_for_money_inline_btn, pay_using_stars_inline_btn, role_shop_inline_keyboard,
@@ -1828,7 +1828,6 @@ async def confirm_callback(callback: CallbackQuery):
         if voter_id in game["day_actions"]["hang_yes"]:
             game["day_actions"]["hang_yes"].remove(voter_id)
     
-    mark_confirm_done(int(game_id), voter_id)
     
     
     await callback.answer(text=t['vote_accepted'])
@@ -3753,7 +3752,7 @@ async def day_attack_callback(callback: CallbackQuery):
 
     # ☠ kill condition
     if hp_left <= 0:
-        kill(game, target_id)
+        await kill(game, target_id)
         role_target = role_label(game['roles'].get(target_id), chat_id)
 
         await send_safe_message(
