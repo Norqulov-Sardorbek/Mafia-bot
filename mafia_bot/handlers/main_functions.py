@@ -13,7 +13,7 @@ from aiogram.enums import ChatMemberStatus
 from core.constants import uz_texts,ROLES_BY_COUNT,ru_texts,en_texts,tr_texts,qz_texts
 from mafia_bot.models import Game, GameSettings,User,MostActiveUser, UserRole, GroupTrials
 from aiogram.types import ChatPermissions,ChatMemberAdministrator, ChatMemberOwner
-from mafia_bot.utils import games_state, last_wishes,game_tasks, active_role_used,writing_allowed_groups,USER_LANG_CACHE,game_locks
+from mafia_bot.utils import games_state, last_wishes,game_tasks, active_role_used,writing_allowed_groups,USER_LANG_CACHE,game_locks,chat_id_game_id
 from mafia_bot.buttons.inline import cart_inline_btn, doc_btn, com_inline_btn, don_inline_btn, mafia_inline_btn, adv_inline_btn, spy_inline_btn, lab_inline_btn, action_inline_btn,use_hero_inline_btn
 
 lock = Lock()
@@ -1929,6 +1929,7 @@ async def stop_game_if_needed(game_id: int):
             pass
 
     # Cleanup
+    chat_id_game_id.pop(chat_id, None)
     games_state.pop(game_id, None)
     writing_allowed_groups.pop(chat_id, None)
     game_tasks.pop(game_id, None)

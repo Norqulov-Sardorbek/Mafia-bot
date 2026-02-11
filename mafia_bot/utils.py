@@ -15,6 +15,7 @@ active_role_used = []
 writing_allowed_groups = {}
 USER_LANG_CACHE = {}
 game_locks = {}
+chat_id_game_id = {}
 
 
 async def set_bot_commands(bot: Bot):

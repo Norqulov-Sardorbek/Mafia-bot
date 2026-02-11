@@ -1348,7 +1348,7 @@ async def trap_callback(callback: CallbackQuery):
     t = get_lang_text(callback.from_user.id)
     tg= get_lang_text(chat_id)
     if not day == str(game_day):
-        await callback.message.edit_text(text=f"{get_actions_lang(callback.from_user.id).get('trap_action')}\n\n{t['late']}", parse_mode="HTML")
+        await callback.message.edit_text(text=f"{get_actions_lang(callback.from_user.id).get('trap_place')}\n\n{t['late']}", parse_mode="HTML")
         return
     
     if not trap_id in game["alive"]:
@@ -1357,7 +1357,7 @@ async def trap_callback(callback: CallbackQuery):
     if target_id == "no":
         # hech narsa qilmaslik
         await callback.message.edit_text(
-            text=f"{get_actions_lang(callback.from_user.id).get('trap_action')}\n\n{t['action_no_choose']}",
+            text=f"{get_actions_lang(callback.from_user.id).get('trap_place')}\n\n{t['action_no_choose']}",
             parse_mode="HTML"
         )
         await send_safe_message(
@@ -1376,7 +1376,7 @@ async def trap_callback(callback: CallbackQuery):
     
     target_name = get_first_name_from_players(int(target_id))
     
-    await callback.message.edit_text(text=f"{get_actions_lang(callback.from_user.id).get('trap_action')}\n\n<a href='tg://user?id={target_id}'>{target_name}</a> {t['action_choose']}")
+    await callback.message.edit_text(text=f"{get_actions_lang(callback.from_user.id).get('trap_place')}\n\n<a href='tg://user?id={target_id}'>{target_name}</a> {t['action_choose']}")
 
 
 @dp.callback_query(F.data.startswith("snyper_"))

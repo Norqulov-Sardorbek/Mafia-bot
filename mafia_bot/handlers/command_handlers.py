@@ -15,11 +15,11 @@ from django.contrib.auth.hashers import check_password
 from mafia_bot.handlers.game_handler import run_game_in_background
 from mafia_bot.handlers.callback_handlers import begin_instance_callback
 from mafia_bot.models import Game, GroupTrials, MostActiveUser,User,BotMessages,GameSettings, UserRole,default_end_date,BotCredentials,LoginAttempts
-from mafia_bot.utils import last_wishes,team_chat_sessions,game_tasks,group_users,stones_taken,gsend_taken,games_state,giveaways,notify_users,active_role_used,writing_allowed_groups
+from mafia_bot.utils import last_wishes,team_chat_sessions,game_tasks,group_users,stones_taken,gsend_taken,games_state,giveaways,notify_users,active_role_used,writing_allowed_groups,chat_id_game_id
 from mafia_bot.handlers.main_functions import (MAFIA_ROLES, find_game,create_main_messages, get_lang_text,
-                                               kill, notify_new_don, promote_new_com_if_needed,get_game_lock,is_player_in_game,
+                                               kill, notify_new_don, promote_new_com_if_needed,get_game_lock,
                                                promote_new_don_if_needed,  shuffle_roles ,check_bot_rights,
-                                               role_label,is_group_admin,mute_user,has_link,parse_amount,get_game_by_chat_id,get_description_lang,get_role_labels_lang,
+                                               role_label,is_group_admin,mute_user,has_link,parse_amount,get_description_lang,get_role_labels_lang,
                                                send_safe_message,notify_new_com)
 from mafia_bot.buttons.inline import (admin_inline_btn, back_btn, claim_chanel_olmos_inline_btn, giveaway_join_btn, group_profile_inline_btn, join_game_btn, 
                                       start_inline_btn, go_to_bot_inline_btn, cart_inline_btn, take_gsend_stone_btn,
@@ -644,6 +644,7 @@ async def stop_registration(game_id=None, chat_id=None, instant=False):
             text=t["game_started"],
             reply_markup=go_to_bot_inline_btn(game.chat_id)
         )
+        chat_id_game_id[chat_id] = game.id
         shuffle_roles(game.id)
         await send_roles(game_id=game.id, chat_id=game.chat_id)
         return
@@ -839,6 +840,7 @@ async def stop_command(message: Message) -> None:
         writing_allowed_groups.pop(game_reg.chat_id, None)
         # task bo'lsa cancel (agar siz game_tasks ishlatayotgan bo'ls
         await stop_registration(game_id=game_reg.id,instant=True)
+        chat_id_game_id.pop(chat_id, None)
         await send_safe_message(chat_id=chat_id, text=tu["registration_stopped"])
         return
 
@@ -863,7 +865,7 @@ async def stop_command(message: Message) -> None:
         game_reg.is_active_game = False
         game_reg.is_started = False
         game_reg.save()
-
+    chat_id_game_id.pop(chat_id, None)
     # RAM dan o'chiramiz
     games_state.pop(game_reg.id, None)
     writing_allowed_groups.pop(game_reg.chat_id, None)
@@ -1131,10 +1133,13 @@ async def delete_not_alive_messages(message: Message):
         except Exception:
             pass
         return
-    
-    game = get_game_by_chat_id(int(chat_id))
-    if not game or game.get("meta", {}).get("is_active_game") is not True:
+    game_id = chat_id_game_id.get(chat_id)
+    game = games_state.get(game_id) if game_id else None
+    if not game or not game.get("meta", {}).get("is_active_game") :
         print("No active game in this chat")
+        print("game_id:", game_id)
+        print("game:", game)
+        print("chat_id_game_id:", chat_id_game_id)
         return 
 
     
@@ -1225,9 +1230,13 @@ async def private_router(message: Message,state: FSMContext) -> None:
     team_chat_id = team_chat_sessions.get(tg_id)
     if not team_chat_id:
         return
-
-    game = get_game_by_chat_id(int(team_chat_id))
+    game_id = chat_id_game_id.get(team_chat_id)
+    game = games_state.get(game_id) if game_id else None
     if not game:
+        print("No game found for team chat relay")
+        print("team_chat_id:", team_chat_id)
+        print("game_id:", game_id)
+        print(game,"game")
         return
 
     if game.get("meta", {}).get("team_chat_open") != "yes":
