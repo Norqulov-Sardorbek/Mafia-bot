@@ -721,10 +721,10 @@ async def find_game(game_id, tg_id, chat_id, user):
 
 
 async def create_main_messages(game_id, tg_id_for_lang):
-    tg_ids = await GameStorage.load(game_id)
-    if not tg_ids.data:
+    game  = await GameStorage.load(game_id)
+    if not game.data:
         return "Xatolik yuz berdi. Iltimos, administrator bilan bog'laning."
-    tg_ids = tg_ids.get("players", [])
+    tg_ids = game.get("players", [])
     t = get_lang_text(int(tg_id_for_lang))
 
     msg = f"{t['reg_started']}\n\n{t['reg_list']}\n"
@@ -732,7 +732,7 @@ async def create_main_messages(game_id, tg_id_for_lang):
     if not tg_ids:
         return msg + f"\n\n{t['no_players']}"
 
-    users_map = tg_ids.get("users_map", {})
+    users_map = game.get("users_map", {})
     
     count = 0
     for tg_id in tg_ids:
