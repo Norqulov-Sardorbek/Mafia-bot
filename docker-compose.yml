@@ -18,21 +18,26 @@ services:
     restart: always
 
 
-  web:
-    build: .
-    command: gunicorn core.wsgi:application --bind 0.0.0.0:8000
-    volumes:
-      - .:/app
-      - media_data:/app/media
-      - static_data:/app/staticfiles
-    ports:
-      - "7000:7000"
-    env_file:
-      - .env
-    depends_on:
-      - db
-      - redis
-    restart: always
+    web:
+      build: .
+      command: >
+        sh -c "
+        python manage.py migrate &&
+        gunicorn core.wsgi:application --bind 0.0.0.0:7000
+        "
+      volumes:
+        - .:/app
+        - media_data:/app/media
+        - static_data:/app/staticfiles
+      ports:
+        - "7000:7000"
+      env_file:
+        - .env
+      depends_on:
+        - db
+        - redis
+      restart: always
+
 
   bot:
     build: .
