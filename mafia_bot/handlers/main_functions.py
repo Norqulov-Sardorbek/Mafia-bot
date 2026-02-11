@@ -732,7 +732,7 @@ async def create_main_messages(game_id, tg_id_for_lang):
     if not tg_ids:
         return msg + f"\n\n{t['no_players']}"
 
-    users_map = (await GameStorage.load(game_id)).get("users_map", {})
+    users_map = tg_ids.get("users_map", {})
     
     count = 0
     for tg_id in tg_ids:
